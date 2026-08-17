@@ -1,130 +1,173 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MP3 to MP4 Mobile Converter</title>
-    <!-- Fully qualified CDN URL for single-threaded ffmpeg.wasm v0.10.15 -->
-    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.10.15/dist/ffmpeg.min.js"></script>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
-        .card { background: #1e293b; padding: 25px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); width: 100%; max-width: 400px; }
-        h2 { margin-top: 0; text-align: center; color: #38bdf8; font-size: 22px; }
-        .input-group { margin-bottom: 20px; }
-        label { display: block; margin-bottom: 8px; font-weight: bold; font-size: 14px; }
-        input[type="file"] { width: 100%; padding: 12px; background: #0f172a; border: 1px dashed #475569; border-radius: 6px; color: #fff; box-sizing: border-box; font-size: 14px; }
-        button { width: 100%; padding: 15px; background: #38bdf8; color: #0f172a; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
-        button:active { background: #0ea5e9; }
-        button:disabled { background: #475569; cursor: not-allowed; opacity: 0.7; }
-        #status { margin-top: 20px; text-align: center; font-size: 13px; color: #cbd5e1; word-break: break-word; background: #0f172a; padding: 12px; border-radius: 6px; border: 1px solid #334155; font-family: monospace; max-height: 120px; overflow-y: auto; }
-        .success { border-color: #22c55e !important; color: #86efac !important; }
-        .error { border-color: #ef4444 !important; color: #fca5a5 !important; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>MP3 to MP4 Mobile Converter</title>
+
+  <!-- ffmpeg.wasm UI and matching core -->
+  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.10.15/dist/ffmpeg.min.js"></script>
+
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+    .card { background: #1e293b; padding: 22px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); width: 100%; max-width: 460px; }
+    h2 { margin-top: 0; text-align: center; color: #38bdf8; font-size: 22px; }
+    .input-group { margin-bottom: 14px; }
+    label { display:block; margin-bottom:6px; font-weight:600; font-size:14px; }
+    input[type="file"] { width:100%; padding:10px; background:#0f172a; border:1px dashed #475569; border-radius:6px; color:#fff; box-sizing:border-box; font-size:14px; }
+    button { width:100%; padding:14px; background:#38bdf8; color:#0f172a; border:none; border-radius:6px; font-size:16px; font-weight:700; cursor:pointer; }
+    button:disabled { background:#475569; cursor:not-allowed; opacity:0.85; }
+    #status { margin-top:12px; font-family:monospace; font-size:13px; white-space:pre-wrap; background:#0f172a; padding:10px; border-radius:8px; border:1px solid #334155; color:#cbd5e1; max-height:160px; overflow:auto; }
+    .success { border-color:#22c55e; color:#86efac; }
+    .error { border-color:#ef4444; color:#fca5a5; }
+  </style>
 </head>
 <body>
+  <div class="card">
+    <h2>MP3 → MP4</h2>
 
-<div class="card">
-    <h2>MP3 to MP4</h2>
     <div class="input-group">
-        <label>1. Select Audio (MP3)</label>
-        <input type="file" id="audioFile" accept="audio/*">
+      <label>1. Select Audio (MP3)</label>
+      <input id="audioFile" type="file" accept="audio/mpeg,audio/*">
     </div>
+
     <div class="input-group">
-        <label>2. Select Image (JPG/PNG)</label>
-        <input type="file" id="imageFile" accept="image/*">
+      <label>2. Select Image (JPG/PNG)</label>
+      <input id="imageFile" type="file" accept="image/png,image/jpeg,image/*">
     </div>
+
     <button id="convertBtn">Convert Locally</button>
     <div id="status">Ready. Select files to begin.</div>
-</div>
+  </div>
 
-<script>
+  <script>
+    // Global FFmpeg from included script
     const { createFFmpeg, fetchFile } = FFmpeg;
-    let ffmpeg = null;
-
     const statusDiv = document.getElementById('status');
     const convertBtn = document.getElementById('convertBtn');
+    let ffmpeg = null;
 
-    function log(message, type = 'info') {
-        statusDiv.innerText = message;
-        statusDiv.className = type;
-        console.log(message);
+    const MAX_BYTES = 100 * 1024 * 1024; // 100MB combined limit
+
+    function setStatus(text, cls = '') {
+      statusDiv.textContent = text;
+      statusDiv.className = cls;
+      console.log(text);
+    }
+    function appendStatus(line) {
+      statusDiv.textContent += '\n' + line;
+      statusDiv.scrollTop = statusDiv.scrollHeight;
+      console.log(line);
+    }
+
+    function getExtension(file, fallback) {
+      if (!file) return fallback;
+      const name = file.name || '';
+      const m = name.match(/\.([a-zA-Z0-9]+)$/);
+      if (m) return m[1].toLowerCase();
+      if (file.type) {
+        if (file.type === 'image/png') return 'png';
+        if (file.type === 'image/jpeg') return 'jpg';
+        if (file.type === 'audio/mpeg') return 'mp3';
+        if (file.type === 'audio/wav') return 'wav';
+      }
+      return fallback;
     }
 
     convertBtn.addEventListener('click', async () => {
-        const audioInput = document.getElementById('audioFile').files[0];
-        const imageInput = document.getElementById('imageFile').files[0];
+      const audio = document.getElementById('audioFile').files[0];
+      const image = document.getElementById('imageFile').files[0];
+      if (!audio || !image) { setStatus('Error: Both audio and image required.', 'error'); return; }
 
-        if (!audioInput || !imageInput) {
-            log('Error: Please select both an audio file and an image file.', 'error');
-            return;
-        }
+      if (audio.size + image.size > MAX_BYTES) {
+        setStatus('Error: Combined file size exceeds 100MB. Use smaller files.', 'error');
+        return;
+      }
 
-        convertBtn.disabled = true;
+      convertBtn.disabled = true;
+      setStatus('Initializing...');
 
-        try {
-            if (!ffmpeg) {
-                log('Loading converter engine (approx. 20mb)...');
-                ffmpeg = createFFmpeg({ 
-                    log: true,
-                    corePath: 'https://unpkg.com/@ffmpeg/core@0.10.0/dist/ffmpeg-core.js'
-                });
-                await ffmpeg.load();
+      try {
+        if (!ffmpeg) {
+          setStatus('Loading ffmpeg.wasm core (may take a few seconds)...');
+          ffmpeg = createFFmpeg({
+            log: true,
+            corePath: 'https://unpkg.com/@ffmpeg/core@0.10.15/dist/ffmpeg-core.js'
+          });
+
+          ffmpeg.setLogger(({ message }) => {
+            // Filter noisy lines; show helpful ones
+            if (!message) return;
+            if (message.includes('frame=') || message.includes('size=') || message.includes('time=')) {
+              appendStatus('[ffmpeg] ' + message);
+            } else if (/^ffmpeg version|Warning|Error/.test(message)) {
+              appendStatus('[ffmpeg] ' + message);
             }
+          });
 
-            if (!ffmpeg.isLoaded()) await ffmpeg.load();
+          ffmpeg.setProgress(({ ratio }) => {
+            const pct = Math.round(ratio * 100);
+            statusDiv.textContent = `Converting... ${pct}%`;
+          });
 
-            log('Reading files...');
-            const audioName = 'input_audio.mp3';
-            const imageName = 'input_image.jpg';
-            
-            ffmpeg.FS('writeFile', audioName, await fetchFile(audioInput));
-            ffmpeg.FS('writeFile', imageName, await fetchFile(imageInput));
-
-            log('Converting... Please keep screen on.');
-            
-            await ffmpeg.run(
-                '-loop', '1',
-                '-i', imageName,
-                '-i', audioName,
-                '-c:v', 'libx264',
-                '-tune', 'stillimage',
-                '-c:a', 'aac',
-                '-b:a', '192k',
-                '-pix_fmt', 'yuv420p',
-                '-shortest',
-                'output.mp4'
-            );
-
-            log('Conversion complete! Preparing download...');
-            const data = ffmpeg.FS('readFile', 'output.mp4');
-
-            const url = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `video_${Date.now()}.mp4`;
-            document.body.appendChild(a);
-            a.click();
-            
-            setTimeout(() => {
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                try {
-                    ffmpeg.FS('unlink', audioName);
-                    ffmpeg.FS('unlink', imageName);
-                    ffmpeg.FS('unlink', 'output.mp4');
-                } catch(e) {}
-            }, 1000);
-
-            log('Success! File downloaded.', 'success');
-
-        } catch (error) {
-            console.error(error);
-            log(`Error: ${error.message || error}`, 'error');
-        } finally {
-            convertBtn.disabled = false;
+          await ffmpeg.load();
         }
-    });
-</script>
 
+        setStatus('Writing files into WASM filesystem...');
+        const audioExt = getExtension(audio, 'mp3');
+        const imageExt = getExtension(image, 'jpg');
+        const audioName = `input_audio.${audioExt}`;
+        const imageName = `input_image.${imageExt}`;
+
+        await ffmpeg.FS('writeFile', audioName, await fetchFile(audio));
+        await ffmpeg.FS('writeFile', imageName, await fetchFile(image));
+
+        setStatus('Running conversion (keep screen on)...');
+        await ffmpeg.run(
+          '-loop', '1',
+          '-i', imageName,
+          '-i', audioName,
+          '-c:v', 'libx264',
+          '-tune', 'stillimage',
+          '-c:a', 'aac',
+          '-b:a', '192k',
+          '-pix_fmt', 'yuv420p',
+          '-shortest',
+          '-movflags', '+faststart',
+          'output.mp4'
+        );
+
+        setStatus('Reading result and preparing download...');
+        const data = ffmpeg.FS('readFile', 'output.mp4');
+        const blob = new Blob([data.buffer], { type: 'video/mp4' });
+
+        // Create an anchor and trigger a download
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `video_${Date.now()}.mp4`;
+        a.style.display = 'none';
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+
+        // Cleanup after short delay to ensure download begins
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          try { ffmpeg.FS('unlink', audioName); ffmpeg.FS('unlink', imageName); ffmpeg.FS('unlink', 'output.mp4'); } catch (e) {}
+        }, 1500);
+
+        setStatus('Success — download started.', 'success');
+      } catch (err) {
+        console.error(err);
+        setStatus('Error: ' + (err && err.message ? err.message : String(err)), 'error');
+      } finally {
+        convertBtn.disabled = false;
+      }
+    });
+
+    // Note: serve over HTTP(S). Opening via file:// may block WASM. Android 15 Chrome should support WASM fine; test on device.
+  </script>
 </body>
 </html>
